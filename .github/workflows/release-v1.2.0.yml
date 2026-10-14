@@ -1,0 +1,36 @@
+name: Release LipatoS Instant Consumables v1.2.0
+
+on:
+  push:
+    paths:
+      - ".github/workflows/release-v1.2.0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+      - name: Verify JavaScript and instant consumption
+        run: |
+          node --check scripts/main.mjs
+          node tests/smoke.cjs
+          node -e 'const m=require("./module.json");if(m.version!=="1.2.0")process.exit(1);'
+      - name: Build installable module
+        run: |
+          zip -q lipatos-instant-consumables.zip module.json scripts/main.mjs README.md
+          unzip -t lipatos-instant-consumables.zip
+          unzip -p lipatos-instant-consumables.zip module.json | python3 -m json.tool > /dev/null
+      - name: Publish v1.2.0 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.2.0 lipatos-instant-consumables.zip module.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "LipatoS — Мгновенное употребление v1.2.0" \
+            --notes "Еда и напитки используются без запроса расхода: бочки и другие сосуды списывают по одному заряду, а еда без зарядов расходуется по количеству. Карточка предмета отправляется в чат, вес и стоимость пересчитываются модулем LipatoS-item-move-stack."
