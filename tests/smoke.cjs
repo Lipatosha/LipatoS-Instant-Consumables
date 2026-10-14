@@ -2,148 +2,141 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-let useHook;
-const errors=[], warnings=[];
-const sandbox={
-  Hooks:{on(name,callback){if(name==="dnd5e.preUseActivity")useHook=callback;}},
+const hooks = new Map(), errors = [], warnings = [];
+const moduleState = {};
+const sandbox = {
+  Hooks: {
+    on(name, fn) { hooks.set(name,fn); },
+    once(name, fn) { hooks.set(name,fn); }
+  },
+  game: { modules:new Map([["lipatos-instant-consumables",moduleState]]) },
   ui:{notifications:{
-    error(value){errors.push(value);},
-    warn(value){warnings.push(value);}
+    error(v){errors.push(v);},
+    warn(v){warnings.push(v);}
   }},
   console
 };
 vm.runInNewContext(fs.readFileSync("scripts/main.mjs","utf8"),sandbox);
-assert.equal(typeof useHook,"function","D&D5e use hook installed");
+hooks.get("ready")();
+const api=moduleState.api, hook=hooks.get("dnd5e.preUseActivity");
+assert.equal(typeof hook,"function");
+assert.equal(typeof api.useItem,"function");
+assert.equal(typeof api.canUse,"function");
 
 const drain=()=>new Promise(resolve=>setImmediate(resolve));
-let id=0;
-function fixture({
-  name="Вересковый закат",type="consumable",subtype="food",
-  quantity=4,usesMax=0,spent=0,enabled=undefined,
-  post=true,isOwner=true
+let nextId=0;
+function make({
+  name="Обычный предмет",type="loot",quantity=4,max=0,spent=0,
+  enabled=undefined,owner=true,posted=true
 }={}) {
-  const uid=++id;
-  const calls={cards:0,updates:[],deletes:0};
+  const id="item-"+(++nextId);
+  const calls={cards:0,updates:[],deleted:0};
   const actor={items:new Map()};
   const item={
-    id:"item-"+uid,uuid:"Actor.test.Item."+uid,
-    name,type,actor,isOwner,
-    system:{quantity,type:{value:subtype},uses:{max:usesMax,spent}},
-    getFlag(module,name) {return enabled;},
-    async displayCard() {
+    id,uuid:"Actor.test.Item."+id,name,actor,
+    documentName:"Item",type,isOwner:owner,
+    system:{uses:{max,spent},quantity},
+    getFlag(){return enabled;},
+    async displayCard(){
       calls.cards++;
-      if(post==="throw")throw new Error("Chat failed");
-      if(post===false)return undefined;
-      return {id:"message-"+uid};
+      if(posted==="throw")throw Error("Chat failure");
+      return posted ? {id:"card"} : undefined;
     },
-    async update(changes) {
-      calls.updates.push(changes);
-      if(Object.hasOwn(changes,"system.uses.spent"))item.system.uses.spent=changes["system.uses.spent"];
-      if(Object.hasOwn(changes,"system.quantity"))item.system.quantity=changes["system.quantity"];
+    async update(change){
+      calls.updates.push(change);
+      if(Object.hasOwn(change,"system.uses.spent"))item.system.uses.spent=change["system.uses.spent"];
+      if(Object.hasOwn(change,"system.quantity"))item.system.quantity=change["system.quantity"];
     },
-    async delete(){calls.deletes++; actor.items.delete(item.id);}
+    async delete(){calls.deleted++;actor.items.delete(id);}
   };
-  actor.items.set(item.id,item);
-  // D&D5e clones activity.item before preUseActivity, but updates must target
-  // the ORIGINAL embedded item from actor.items.
-  const activity={actor,item:{id:item.id,actor,type,itemClone:true}};
-  return {item,actor,activity,calls};
+  actor.items.set(id,item);
+  return {item,calls,activity:{item:{id,actor},actor,type:"utility"}};
 }
 
-async function run() {
-  {
-    const x=fixture({name:'Бочка пива "Последняя медь"',type:"equipment",
-                     subtype:"gear",quantity:1,usesMax:100,spent:45});
-    assert.equal(useHook(x.activity),false,"beer barrel should bypass native charge prompt");
+async function run(){
+  for(const type of ["consumable","loot","tool","weapon"]){
+    const x=make({type,quantity:2});
+    assert.equal(api.useItem(x.item),true,type+" menu command accepted");
     await drain();
-    assert.equal(x.calls.cards,1,"barrel must appear in chat exactly once");
-    assert.equal(x.calls.updates.length,1);
-    assert.equal(x.calls.updates[0]["system.uses.spent"],46,"spend one charge");
-    assert.equal(x.calls.updates[0]["system.quantity"],undefined,"never delete charged barrel");
-    assert.equal(x.item.system.quantity,1);
-    assert.equal(x.calls.deletes,0);
+    assert.equal(x.calls.cards,1,type+" card");
+    assert.equal(x.item.system.quantity,1,type+" stack reduced");
+    assert.equal(x.calls.deleted,0);
+  }
+  for(const type of ["equipment","container","backpack"]){
+    const x=make({type,name:'Бочка пива "Последняя медь"',max:100,enabled:true});
+    assert.equal(api.canUse(x.item),false,type+" explicitly excluded");
+    assert.equal(api.useItem(x.item),false);
+    assert.equal(hook(x.activity),undefined,type+" native behaviour preserved");
+    await drain();
+    assert.equal(x.calls.updates.length,0);
+    assert.equal(x.calls.cards,0);
+  }
+  for(const type of ["feat","spell","class","subclass","race","background","facility"]){
+    const x=make({type,max:10});
+    assert.equal(api.canUse(x.item),false,type+" never delete actor build entries");
+    assert.equal(api.useItem(x.item),false);
   }
   {
-    const x=fixture({name:"Бочка пива",type:"equipment",quantity:1,usesMax:100,spent:99});
-    assert.equal(useHook(x.activity),false);
+    const x=make({type:"consumable",name:"Potion",max:10,spent:4,quantity:1});
+    assert.equal(hook(x.activity),false,"use consumes charge without dialog");
     await drain();
-    assert.equal(x.item.system.uses.spent,100,"last charge is consumed");
-    assert.equal(x.calls.deletes,0,"empty vessel must remain");
-    assert.equal(x.item.system.quantity,1);
-  }
-  {
-    const x=fixture({name:"Бочка пива",type:"equipment",quantity:1,usesMax:100,spent:100});
-    assert.equal(useHook(x.activity),false);
-    await drain();
-    assert.equal(x.calls.cards,0,"empty barrel doesn't send a fake use card");
-    assert.equal(x.calls.updates.length,0,"empty barrel cannot spend another charge");
-    assert.equal(warnings.length,1,"notify of empty barrel");
-  }
-  {
-    const x=fixture({quantity:4});
-    assert.equal(useHook(x.activity),false);
-    await drain();
-    assert.equal(x.item.system.quantity,3,"un-charged food still consumes one quantity");
+    assert.equal(x.item.system.uses.spent,5,"charge-first");
+    assert.equal(x.item.system.quantity,1,"preserve charged item");
     assert.equal(x.calls.cards,1);
   }
   {
-    const x=fixture({quantity:1});
-    assert.equal(useHook(x.activity),false);
+    const x=make({type:"weapon",name:"Dagger",quantity:1});
+    x.activity.type="attack";
+    assert.equal(hook(x.activity),undefined,"weapon attack not swallowed");
+    assert.equal(api.useItem(x.item),true,"explicit inventory Use spends weapon");
     await drain();
-    assert.equal(x.calls.deletes,1,"last food unit removed");
+    assert.equal(x.calls.deleted,1,"last physical item removed by Use");
   }
   {
-    const x=fixture({name:"Сухой паёк",type:"consumable",subtype:"food",usesMax:3,spent:1,quantity:1});
-    assert.equal(useHook(x.activity),false);
+    const x=make({type:"consumable",quantity:1});
+    assert.equal(hook(x.activity),false);
     await drain();
-    assert.equal(x.item.system.uses.spent,2,"charged food uses charges before quantity");
-    assert.equal(x.calls.deletes,0);
+    assert.equal(x.calls.deleted,1,"last stack item deleted");
   }
   {
-    const x=fixture({name:"Жезл огненных шаров",type:"equipment",subtype:"gear",usesMax:7});
-    assert.equal(useHook(x.activity),undefined,"magic wand unchanged");
+    const x=make({type:"tool",max:2,spent:1,quantity:1});
+    assert.equal(api.useItem(x.item),true);
     await drain();
-    assert.equal(x.calls.cards,0);
-  }
-  {
-    const x=fixture({name:"Бочка с маслом",type:"equipment",subtype:"gear",usesMax:50});
-    assert.equal(useHook(x.activity),undefined,"nonfood liquid not auto consumed");
-  }
-  {
-    const x=fixture({name:"My Custom Ration",type:"equipment",subtype:"gear",usesMax:3,enabled:true});
-    assert.equal(useHook(x.activity),false,"explicit opt in");
+    assert.equal(x.item.system.uses.spent,2,"last charge spent");
+    assert.equal(x.calls.deleted,0,"empty rechargeable tool remains");
+    assert.equal(api.useItem(x.item),true);
     await drain();
-    assert.equal(x.item.system.uses.spent,1);
+    assert.equal(x.calls.cards,1,"empty item never sent to chat again");
+    assert.ok(warnings.length>0,"empty item warning");
   }
   {
-    const x=fixture({name:"Бочка пива",type:"equipment",usesMax:3,enabled:false});
-    assert.equal(useHook(x.activity),undefined,"explicit opt out");
-  }
-  {
-    const x=fixture({post:false});
-    assert.equal(useHook(x.activity),false);
+    const x=make({type:"loot",quantity:10});
+    assert.equal(api.useItem(x.item),true);
+    assert.equal(api.useItem(x.item),true);
     await drain();
-    assert.equal(x.calls.updates.length,0,"no charge or quantity spent if card suppressed");
+    assert.equal(x.calls.updates.length,1,"rapid double-use deduplicated");
   }
   {
-    const x=fixture({post:"throw"});
-    assert.equal(useHook(x.activity),false);
+    const x=make({type:"consumable",enabled:false});
+    assert.equal(api.useItem(x.item),false,"explicit disable works");
+  }
+  {
+    const x=make({type:"loot",posted:false});
+    assert.equal(api.useItem(x.item),true);
     await drain();
-    assert.equal(x.calls.updates.length,0);
+    assert.equal(x.calls.updates.length,0,"cancelled card does not consume");
+  }
+  {
+    const x=make({type:"loot",posted:"throw"});
+    assert.equal(api.useItem(x.item),true);
+    await drain();
+    assert.equal(x.calls.updates.length,0,"failed card does not consume");
     assert.equal(errors.length,1);
   }
   {
-    const x=fixture({name:"Бочка пива",type:"equipment",usesMax:100,quantity:1});
-    assert.equal(useHook(x.activity),false);
-    assert.equal(useHook(x.activity),false,"duplicate interaction swallowed");
-    await drain();
-    assert.equal(x.calls.cards,1,"duplicate click only one chat card");
-    assert.equal(x.calls.updates.length,1,"duplicate click only one charge");
+    const x=make({type:"consumable",owner:false});
+    assert.equal(api.useItem(x.item),false,"permission check");
   }
-  {
-    const x=fixture({name:"Бочка пива",type:"equipment",usesMax:100,isOwner:false});
-    assert.equal(useHook(x.activity),undefined,"unowned item remains untouched");
-  }
-  console.log("Instant Consumables v1.2.0: charged barrels, food quantity, chat, empty/no prompt, opt-in and race protection passed.");
+  console.log("Instant Consumables v1.3.0: all physical inventory categories, exclusions, charge-first, quantity, attacks, chat and pending guard passed.");
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});
