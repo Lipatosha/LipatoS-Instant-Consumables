@@ -1,10 +1,13 @@
 {
   "id": "lipatos-instant-consumables",
   "title": "LipatoS — Мгновенное употребление",
-  "description": "Мгновенное использование еды и напитков Аиндора без диалогов: списание одной порции или удаление последней.",
-  "version": "1.0.0",
+  "description": "Мгновенное употребление еды и напитков Аиндора: стандартная карточка в чате D&D5e, списание одной порции либо удаление последней без подтверждений.",
+  "version": "1.1.0",
   "authors": [
-    { "name": "LipatoS", "url": "https://github.com/Lipatosha" }
+    {
+      "name": "LipatoS",
+      "url": "https://github.com/Lipatosha"
+    }
   ],
   "compatibility": {
     "minimum": "14",
@@ -22,10 +25,12 @@
       }
     ]
   },
-  "esmodules": ["scripts/main.mjs"],
+  "esmodules": [
+    "scripts/main.mjs"
+  ],
   "url": "https://github.com/Lipatosha/LipatoS-Instant-Consumables",
   "manifest": "https://raw.githubusercontent.com/Lipatosha/LipatoS-Instant-Consumables/main/module.json",
-  "download": "https://raw.githubusercontent.com/Lipatosha/LipatoS-Instant-Consumables/main/dist/lipatos-instant-consumables-v1.0.0.zip",
+  "download": "https://github.com/Lipatosha/LipatoS-Instant-Consumables/releases/latest/download/lipatos-instant-consumables.zip",
   "readme": "https://github.com/Lipatosha/LipatoS-Instant-Consumables/blob/main/README.md",
   "bugs": "https://github.com/Lipatosha/LipatoS-Instant-Consumables/issues"
 }
