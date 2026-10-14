@@ -1,5 +1,5 @@
 /**
- * LipatoS — Мгновенное употребление v1.0.0
+ * LipatoS — Мгновенное употребление v1.1.0
  * Foundry VTT v14 / dnd5e v6.0.6
  *
  * Использование активности еды/напитков без диалога: списать одну порцию,
@@ -52,6 +52,13 @@ Hooks.on("dnd5e.preUseActivity", (activity) => {
       if (!item.isOwner || !actor.items.has(item.id)) return;
       const quantity = Number(item.system?.quantity);
       if (!Number.isFinite(quantity) || quantity <= 0) return;
+
+      // Render a native D&D 5e item chat card, exactly like the
+      // "Показать в чате" action for equipment. The activity's regular
+      // chat message is cancelled by preUseActivity, so only ONE card is sent.
+      // Do not consume the item if posting the card failed or was blocked.
+      const card = await item.displayCard();
+      if (!card) return;
 
       if (quantity > 1) {
         await item.update({ "system.quantity": quantity - 1 });
