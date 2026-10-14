@@ -1,0 +1,30 @@
+name: Publish LipatoS Instant Consumables v1.0.0
+
+on:
+  push:
+    paths:
+      - ".github/workflows/publish-v1.0.0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify package
+        run: |
+          unzip -t dist/lipatos-instant-consumables-v1.0.0.zip
+          unzip -p dist/lipatos-instant-consumables-v1.0.0.zip module.json | python3 -m json.tool > /dev/null
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.0.0 dist/lipatos-instant-consumables-v1.0.0.zip module.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "LipatoS — Мгновенное употребление v1.0.0" \
+            --notes "Мгновенное употребление еды и напитков без подтверждений. Совместимость: Foundry VTT v14 и dnd5e 6.0.6."
