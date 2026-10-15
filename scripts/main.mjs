@@ -95,7 +95,8 @@ async function instantUse(item) {
     if (quantity > 1) {
       await item.update({ "system.quantity": quantity - 1 });
     } else {
-      await item.delete();
+      // Last portion is consumed, not manually deleted from inventory.
+      await item.delete({ lipatosItemConsumed: true, itemMoveStackUse: true });
     }
   } catch (error) {
     console.error(MODULE_ID + " | Не удалось использовать предмет", error);
