@@ -1,0 +1,40 @@
+name: Release LipatoS Instant Consumables v1.3.2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v1.3.2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check code and consumption regression tests
+        run: |
+          node --check scripts/main.mjs
+          node tests/consumption-tag.cjs
+          node -e 'const m=require("./module.json");if(m.version!=="1.3.2")process.exit(1);'
+      - name: Build installable ZIP
+        run: |
+          zip -q lipatos-instant-consumables.zip module.json scripts/main.mjs README.md
+          unzip -t lipatos-instant-consumables.zip
+      - name: Publish version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.3.2"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" lipatos-instant-consumables.zip module.json --clobber
+          else
+            gh release create "$TAG" lipatos-instant-consumables.zip module.json \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "LipatoS — Мгновенное употребление $TAG" \
+              --notes "Последняя порция еды удаляется как использование, не вызывая ложное уведомление о ручном удалении."
+          fi
